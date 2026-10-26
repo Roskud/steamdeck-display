@@ -1,0 +1,46 @@
+# Build artifacts
+bin/
+build/
+dist/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+
+# C/C++ compiled binaries
+steamos-client/deckdisplay_touch
+steamos-client/deckdisplay_client
+windows-host/deckdisplay_server.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+*.dir/
+
+# Node.js / NPM
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# IDE & OS
+.vscode/
+.vs/
+.idea/
+*.suo
+*.user
+*.DS_Store
+Thumbs.db

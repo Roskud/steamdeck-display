@@ -1,0 +1,106 @@
+#!/bin/bash
+# ==============================================================================
+# DeckDisplay - Automatic Installation & Setup Script for Steam Deck (SteamOS)
+# Prepares environment, installs dependencies, compiles binaries, configures
+# systemd service for USB gadget, and creates desktop launcher.
+# ==============================================================================
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "===================================================================="
+echo "    DeckDisplay - Установка и настройка для Steam Deck (SteamOS)   "
+echo "===================================================================="
+echo ""
+
+# 1. Проверка прав администратора (sudo)
+if [ "$EUID" -ne 0 ]; then
+    echo "[DeckDisplay] Требуются привилегии root для установки компонентов."
+    echo "[DeckDisplay] Перезапуск скрипта через sudo..."
+    exec sudo bash "$0" "$@"
+fi
+
+# 2. Проверка и снятие защиты файловой системы SteamOS от записи
+if command -v steamos-readonly >/dev/null 2>&1; then
+    echo "[DeckDisplay] Отключение защиты файловой системы от записи (steamos-readonly)..."
+    steamos-readonly disable || true
+fi
+
+# 3. Инициализация ключей пакетного менеджера pacman
+echo "[DeckDisplay] Проверка и обновление ключей pacman..."
+pacman-key --init || true
+pacman-key --populate archlinux holo 2>/dev/null || true
+
+# 4. Установка пакетов компиляции и зависимостей
+echo "[DeckDisplay] Установка зависимостей (gcc, sdl2, ffmpeg, dnsmasq, pkgconf)..."
+pacman -Sy --needed --noconfirm base-devel gcc pkgconf sdl2 ffmpeg dnsmasq linux-api-headers glibc || {
+    echo "[Предупреждение] pacman завершился с предупреждением, продолжаем..."
+}
+
+# 5. Сборка бинарников
+echo "[DeckDisplay] Сборка высокопроизводительных модулей (deckdisplay_touch, deckdisplay_client)..."
+cd "$DIR"
+make clean || true
+make
+
+# 6. Установка прав на исполнение скриптов
+chmod +x "$DIR/deckdisplay-gadget.sh"
+chmod +x "$DIR/deckdisplay-cleanup.sh"
+chmod +x "$DIR/launch_deckdisplay.sh"
+
+# 7. Установка и активация системного сервиса
+echo "[DeckDisplay] Установка системного сервиса deckdisplay-gadget.service..."
+SERVICE_FILE="/etc/systemd/system/deckdisplay-gadget.service"
+cat << EOF > "$SERVICE_FILE"
+[Unit]
+Description=DeckDisplay Composite USB Gadget (CDC-NCM + HID Touchscreen)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$DIR/deckdisplay-gadget.sh
+ExecStop=$DIR/deckdisplay-cleanup.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable deckdisplay-gadget.service
+systemctl restart deckdisplay-gadget.service || true
+
+# 8. Создание ярлыка на Рабочем столе
+DESKTOP_DIR="/home/deck/Desktop"
+if [ -d "$DESKTOP_DIR" ]; then
+    echo "[DeckDisplay] Создание ярлыка запуска на Рабочем столе..."
+    cat << EOF > "$DESKTOP_DIR/DeckDisplay.desktop"
+[Desktop Entry]
+Name=DeckDisplay Monitor
+Comment=Использовать Steam Deck как второй монитор по USB Type-C
+Exec=$DIR/launch_deckdisplay.sh
+Icon=video-display
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+EOF
+    chmod +x "$DESKTOP_DIR/DeckDisplay.desktop"
+    chown deck:deck "$DESKTOP_DIR/DeckDisplay.desktop" 2>/dev/null || true
+fi
+
+echo ""
+echo "===================================================================="
+echo "                   УСТАНОВКА УСПЕШНО ЗАВЕРШЕНА!                    "
+echo "===================================================================="
+echo ""
+echo "Следующие шаги:"
+echo "1. Проверьте BIOS Steam Deck (USB Dual Role Device -> DRD):"
+echo "   Выключите Deck -> зажмите 'Volume +' и нажмите 'Power' ->"
+echo "   Setup Utility -> Advanced -> USB Configuration -> 'DRD'."
+echo ""
+echo "2. Добавьте ярлык в Steam для запуска из Gaming Mode:"
+echo "   Откройте клиент Steam на Deck -> Игры -> Добавить стороннюю игру ->"
+echo "   выберите '$DIR/launch_deckdisplay.sh'."
+echo ""
+echo "3. Подключите кабель USB Type-C к ПК и запустите DeckDisplay!"
+echo "===================================================================="

@@ -1,0 +1,12 @@
+[Unit]
+Description=DeckDisplay Composite USB Gadget (CDC-NCM + HID Touchscreen)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/deck/deckdisplay/steamos-client/deckdisplay-gadget.sh
+ExecStop=/home/deck/deckdisplay/steamos-client/deckdisplay-cleanup.sh
+
+[Install]
+WantedBy=multi-user.target
