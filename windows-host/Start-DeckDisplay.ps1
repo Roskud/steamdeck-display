@@ -2,6 +2,7 @@
 # DeckDisplay - Automated Plug & Play Watchdog & Hardware Streamer for Windows
 # Automatically detects Steam Deck USB-C connection, configures network adapter,
 # selects optimal GPU hardware encoder (NVENC / AMF / QSV), and launches stream.
+# Supports both compiled C++ Zero-Copy server and Zero-Build FFmpeg ddagrab.
 # ==============================================================================
 
 [CmdletBinding()]
@@ -13,6 +14,12 @@ param(
     [string]$Encoder = "auto",        # auto, h264_nvenc, h264_amf, h264_qsv, libx264
     [string]$Bitrate = "45M"          # 45 Mbps битрейт передачи
 )
+
+# Фиксация рабочей директории в каталоге скрипта
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+if ($scriptDir) {
+    Set-Location $scriptDir
+}
 
 # Проверка и запрос прав Администратора
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -48,20 +55,37 @@ if ($Encoder -eq "auto") {
     } else {
         $Encoder = "libx264"
     }
-    Write-Host "[DeckDisplay] Автоматически выбран аппаратный энкодер: $Encoder" -ForegroundColor Green
+    Write-Host "[DeckDisplay] Автоматически выбран энкодер: $Encoder" -ForegroundColor Green
 }
 
-# 2. Проверка наличия FFmpeg в системе (при отсутствии скомпилированного сервера)
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# 2. Проверка наличия скомпилированного сервера или совместимого FFmpeg
 $serverExe = Join-Path $scriptDir "deckdisplay_server.exe"
 
+function Test-FFmpegDdagrab {
+    $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $null }
+    try {
+        $filters = & $cmd.Source -filters 2>&1
+        if ($filters -match "ddagrab") {
+            return $cmd
+        }
+    } catch {}
+    return $null
+}
+
 if (-not (Test-Path $serverExe)) {
-    $ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if (-not $ffmpegCmd) {
-        Write-Host "[ВНИМАНИЕ] Утилита ffmpeg.exe не найдена в PATH!" -ForegroundColor Red
-        Write-Host "[DeckDisplay] Рекомендуется установить FFmpeg через winget:" -ForegroundColor Yellow
-        Write-Host "    winget install Gyan.FFmpeg" -ForegroundColor White
-        Write-Host "Или запустите вспомогательный скрипт install-ffmpeg.ps1" -ForegroundColor Yellow
+    $compatibleFFmpeg = Test-FFmpegDdagrab
+    if (-not $compatibleFFmpeg) {
+        $anyFFmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+        if ($anyFFmpeg) {
+            Write-Host "[ВНИМАНИЕ] В системе найден устаревший FFmpeg ($($anyFFmpeg.Source))," -ForegroundColor Yellow
+            Write-Host "           в котором отсутствует поддержка фильтра захвата 'ddagrab'!" -ForegroundColor Yellow
+        } else {
+            Write-Host "[ВНИМАНИЕ] Ни скомпилированный deckdisplay_server.exe, ни FFmpeg не найдены!" -ForegroundColor Yellow
+        }
+        Write-Host "[DeckDisplay] Для работы в Zero-Build режиме установите актуальный FFmpeg:" -ForegroundColor Yellow
+        Write-Host "    Запустите: .\install-ffmpeg.ps1" -ForegroundColor White
+        Write-Host "    Или:       winget install Gyan.FFmpeg" -ForegroundColor White
         Write-Host ""
     }
 }
@@ -72,7 +96,7 @@ Write-Host "[DeckDisplay] Ожидание подключения Steam Deck п�
 while ($true) {
     # Поиск виртуального сетевого адаптера USB CDC-NCM / Remote NDIS
     $usbNet = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object {
-        ($_.InterfaceDescription -match "UsbNcm|Remote NDIS|CDC|Steam Deck" -or $_.Name -match "UsbNcm|Ethernet") -and
+        ($_.InterfaceDescription -match "UsbNcm|Remote NDIS|CDC|Steam Deck" -or $_.Name -match "UsbNcm|Ethernet|Deck") -and
         $_.Status -eq "Up"
     }
 
@@ -88,14 +112,14 @@ while ($true) {
         }
     }
 
-    # Проверка доступности Steam Deck по сети
+    # Проверка сетевой доступности Steam Deck
     $pingOk = Test-Connection -ComputerName $DeckIP -Count 1 -Quiet -ErrorAction SilentlyContinue
     if ($pingOk) {
         Write-Host "[DeckDisplay] Steam Deck обнаружен в сети ($DeckIP)! Запуск видеопотока..." -ForegroundColor Green
 
         if (Test-Path $serverExe) {
-            # Вариант А: Запуск скомпилированного C++ DXGI сервера
-            Write-Host "[DeckDisplay] Запуск нативного C++ Zero-Copy сервера ($serverExe)..." -ForegroundColor Cyan
+            # Вариант А: Запуск скомпилированного C++ DXGI Zero-Copy сервера
+            Write-Host "[DeckDisplay] Запуск скомпилированного DXGI сервера ($serverExe)..." -ForegroundColor Cyan
             & $serverExe $DeckIP $Port $OutputIdx $Framerate
         } else {
             # Вариант Б: Zero-Build режим через аппаратный конвейер FFmpeg (ddagrab)
@@ -105,13 +129,14 @@ while ($true) {
                 "h264_nvenc" { "-c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -forced-idr 1 -repeat-headers 1 -bf 0" }
                 "h264_amf"   { "-c:v h264_amf -usage ultralowlatency -quality speed -header_insertion_mode idr -bf 0" }
                 "h264_qsv"   { "-c:v h264_qsv -preset veryfast -low_delay_brc 1 -forced-idr 1 -bf 0" }
-                default      { "-c:v libx264 -preset ultrafast -tune zerolatency -bf 0" }
+                default      { "-c:v libx264 -preset ultrafast -tune zerolatency -bf 0 -pix_fmt yuv420p" }
             }
 
-            # Фильтр ddagrab производит аппаратный захват VRAM и преобразует текстуру в NV12 для энкодера
+            $pixFormat = if ($Encoder -eq "libx264") { "format=yuv420p" } else { "format=nv12" }
+
+            # Фильтр ddagrab производит аппаратный захват экрана напрямую из D3D11 VRAM
             $cmd = "ffmpeg -hide_banner -loglevel warning " +
-                   "-init_hw_device d3d11va=gpu:0 -filter_hw_device gpu " +
-                   "-f lavfi -i `"ddagrab=output_idx=$($OutputIdx):framerate=$($Framerate):draw_mouse=1,hwdownload,format=bgra,format=nv12`" " +
+                   "-f lavfi -i `"ddagrab=output_idx=$($OutputIdx):framerate=$($Framerate):draw_mouse=1,hwdownload,format=bgra,$pixFormat`" " +
                    "$encArgs -b:v $Bitrate -maxrate $Bitrate -bufsize 500k -g $Framerate " +
                    "-f h264 `"udp://$($DeckIP):$($Port)?pkt_size=1400`""
 

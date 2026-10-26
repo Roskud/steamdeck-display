@@ -3,6 +3,7 @@
 // Captures desktop directly from VRAM via DXGI Desktop Duplication API,
 // transfers texture via Zero-Copy D3D11 to hardware encoder (NVENC / AMF / QSV),
 // and streams low-latency H.264 NAL units over UDP to Steam Deck.
+// Includes heartbeat frame re-emission for static desktops and auto-reconnection.
 // ==============================================================================
 
 #define WIN32_LEAN_AND_MEAN
@@ -44,7 +45,7 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
     return FALSE;
 }
 
-// Определение порядка опроса энкодеров на основе производителя видеокарты
+// Определение списка приоритетных аппаратных энкодеров по VendorId адаптера
 std::vector<const char*> get_preferred_encoders(UINT vendorId) {
     std::vector<const char*> list;
     if (vendorId == 0x10DE) { // NVIDIA
@@ -159,13 +160,13 @@ int main(int argc, char** argv) {
     hr = dxgi_output1->DuplicateOutput(d3d_device.Get(), &desk_dupl);
     if (FAILED(hr)) {
         std::cerr << "[Server] Ошибка DuplicateOutput (0x" << std::hex << hr << ")!\n";
-        std::cerr << "[Server] Проверьте, что приложение не запущено под учетной записью с ограниченными правами.\n";
+        std::cerr << "[Server] Проверьте, что приложение не запущено под ограниченными правами.\n";
         closesocket(udp_sock);
         WSACleanup();
         return 1;
     }
 
-    // 4. Настройка аппаратного энкодера FFmpeg с D3D11VA
+    // 4. Поиск аппаратного энкодера FFmpeg с поддержкой D3D11VA
     auto preferred_encoders = get_preferred_encoders(adapter_desc.VendorId);
     const AVCodec* encoder = nullptr;
     std::string chosen_encoder_name = "";
@@ -175,19 +176,15 @@ int main(int argc, char** argv) {
         if (c) {
             encoder = c;
             chosen_encoder_name = enc_name;
-            std::cout << "[Server] Попытка активации энкодера: " << enc_name << "\n";
+            std::cout << "[Server] Проверка энкодера: " << enc_name << "\n";
             break;
         }
     }
 
     if (!encoder) {
-        encoder = avcodec_find_encoder_by_name("libx264");
-        chosen_encoder_name = "libx264";
-        std::cout << "[Server] Аппаратные энкодеры не найдены, fallback на libx264.\n";
-    }
-
-    if (!encoder) {
-        std::cerr << "[Server] Ни один поддерживаемый энкодер H.264 не найден!\n";
+        std::cerr << "\n[ОШИБКА] Ни один аппаратный энкодер D3D11 (NVENC, AMF, QSV) не найден!\n";
+        std::cerr << "[Server] Для работы на данном ПК без аппаратного D3D11 энкодера\n";
+        std::cerr << "         запустите Start-DeckDisplay.ps1 (Zero-Build режим через FFmpeg ddagrab).\n";
         closesocket(udp_sock);
         WSACleanup();
         return 1;
@@ -202,13 +199,13 @@ int main(int argc, char** argv) {
     enc_ctx->bit_rate  = bitrate;
     enc_ctx->rc_max_rate = bitrate;
     enc_ctx->rc_buffer_size = bitrate / target_fps; // Однокадровый VBV буфер для сверхнизкой латентности
-    // ВАЖНО: GOP size равен частоте кадров (1 IDR раз в секунду), чтобы при подключении
-    // клиента или потере UDP пакета поток мгновенно восстанавливался в течение 1 сек!
+    // GOP size равен частоте кадров (1 IDR раз в секунду), чтобы при подключении
+    // клиента или потере UDP пакета поток мгновенно синхронизировался!
     enc_ctx->gop_size  = target_fps;
     enc_ctx->max_b_frames = 0;
     enc_ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
-    // Включение вставки SPS/PPS параметров в каждый IDR кадр
+    // Опции минимальной задержки и повтора заголовков SPS/PPS в IDR кадрах
     av_opt_set(enc_ctx->priv_data, "preset", "p1", 0);
     av_opt_set(enc_ctx->priv_data, "tune", "ull", 0);
     av_opt_set(enc_ctx->priv_data, "zerolatency", "1", 0);
@@ -255,6 +252,42 @@ int main(int argc, char** argv) {
     AVFrame* hw_frame = av_frame_alloc();
     AVPacket* pkt = av_packet_alloc();
     int64_t pts = 0;
+    auto last_sent_time = std::chrono::steady_clock::now();
+    bool has_last_texture = false;
+
+    // Вспомогательная текстура для хранения последнего захваченного кадра (heartbeat при статичном экране)
+    D3D11_TEXTURE2D_DESC tex_desc{};
+    tex_desc.Width = width;
+    tex_desc.Height = height;
+    tex_desc.MipLevels = 1;
+    tex_desc.ArraySize = 1;
+    tex_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    tex_desc.SampleDesc.Count = 1;
+    tex_desc.Usage = D3D11_USAGE_DEFAULT;
+    tex_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    ComPtr<ID3D11Texture2D> last_captured_tex;
+    d3d_device->CreateTexture2D(&tex_desc, nullptr, &last_captured_tex);
+
+    // Функция отправки пакетов кадра
+    auto send_frame_packets = [&](AVFrame* frame_to_send) {
+        frame_to_send->pts = pts++;
+        if (avcodec_send_frame(enc_ctx, frame_to_send) == 0) {
+            while (avcodec_receive_packet(enc_ctx, pkt) == 0) {
+                const uint8_t* data = pkt->data;
+                int remaining = pkt->size;
+                while (remaining > 0 && g_running) {
+                    int chunk = (remaining > 1400) ? 1400 : remaining;
+                    sendto(udp_sock, reinterpret_cast<const char*>(data), chunk, 0,
+                           reinterpret_cast<sockaddr*>(&dest_addr), sizeof(dest_addr));
+                    data += chunk;
+                    remaining -= chunk;
+                }
+                av_packet_unref(pkt);
+            }
+        }
+        last_sent_time = std::chrono::steady_clock::now();
+    };
 
     // 5. Главный конвейер Zero-Copy захвата и стриминга
     while (g_running) {
@@ -262,12 +295,26 @@ int main(int argc, char** argv) {
         DXGI_OUTDUPL_FRAME_INFO frame_info;
 
         hr = desk_dupl->AcquireNextFrame(16, &frame_info, &desk_resource);
+
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+            // Экран статичен: если прошло более 500 мс с последнего отправленного кадра,
+            // пересылаем последний кадр для поддержания активности потока и моментального отклика новых клиентов
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_sent_time).count();
+            if (elapsed_ms >= 500 && has_last_texture && last_captured_tex) {
+                if (av_hwframe_get_buffer(hw_frames_ref, hw_frame, 0) == 0) {
+                    auto* dst_tex = reinterpret_cast<ID3D11Texture2D*>(hw_frame->data[0]);
+                    int dst_index = static_cast<int>(reinterpret_cast<intptr_t>(hw_frame->data[1]));
+                    d3d_context->CopySubresourceRegion(dst_tex, dst_index, 0, 0, 0, last_captured_tex.Get(), 0, nullptr);
+                    send_frame_packets(hw_frame);
+                    av_frame_unref(hw_frame);
+                }
+            }
             continue;
         }
 
         if (hr == DXGI_ERROR_ACCESS_LOST) {
-            std::cout << "[Server] Внимание: Доступ к экрану временно потерян (смена разрешения/UAC). Переподключение...\n";
+            std::cout << "[Server] Доступ к экрану временно потерян (смена разрешения/UAC). Переподключение...\n";
             desk_dupl.Reset();
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             dxgi_output1->DuplicateOutput(d3d_device.Get(), &desk_dupl);
@@ -281,30 +328,21 @@ int main(int argc, char** argv) {
         ComPtr<ID3D11Texture2D> acquired_tex;
         desk_resource.As(&acquired_tex);
 
+        // Сохраняем копию для heartbeat при статичном экране
+        if (last_captured_tex && acquired_tex) {
+            d3d_context->CopyResource(last_captured_tex.Get(), acquired_tex.Get());
+            has_last_texture = true;
+        }
+
         if (av_hwframe_get_buffer(hw_frames_ref, hw_frame, 0) == 0) {
             auto* dst_tex = reinterpret_cast<ID3D11Texture2D*>(hw_frame->data[0]);
             int dst_index = static_cast<int>(reinterpret_cast<intptr_t>(hw_frame->data[1]));
 
-            // Прямое аппаратное копирование текстуры внутри видеопамяти GPU (Zero-Copy)
+            // Прямое аппаратное копирование внутри VRAM GPU (Zero-Copy)
             d3d_context->CopySubresourceRegion(dst_tex, dst_index, 0, 0, 0, acquired_tex.Get(), 0, nullptr);
             desk_dupl->ReleaseFrame();
 
-            hw_frame->pts = pts++;
-            if (avcodec_send_frame(enc_ctx, hw_frame) == 0) {
-                while (avcodec_receive_packet(enc_ctx, pkt) == 0) {
-                    // Фрагментация NAL-пакетов под MTU Ethernet (до 1400 байт) для предотвращения фрагментации IP
-                    const uint8_t* data = pkt->data;
-                    int remaining = pkt->size;
-                    while (remaining > 0 && g_running) {
-                        int chunk = (remaining > 1400) ? 1400 : remaining;
-                        sendto(udp_sock, reinterpret_cast<const char*>(data), chunk, 0,
-                               reinterpret_cast<sockaddr*>(&dest_addr), sizeof(dest_addr));
-                        data += chunk;
-                        remaining -= chunk;
-                    }
-                    av_packet_unref(pkt);
-                }
-            }
+            send_frame_packets(hw_frame);
             av_frame_unref(hw_frame);
         } else {
             desk_dupl->ReleaseFrame();

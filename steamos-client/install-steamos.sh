@@ -48,7 +48,15 @@ chmod +x "$DIR/deckdisplay-gadget.sh"
 chmod +x "$DIR/deckdisplay-cleanup.sh"
 chmod +x "$DIR/launch_deckdisplay.sh"
 
-# 7. Установка и активация системного сервиса
+# 7. Настройка udev-правила для доступа к /dev/hidg* пользователю deck
+echo "[DeckDisplay] Установка udev-правила для /dev/hidg*..."
+cat << 'EOF' > /etc/udev/rules.d/99-deckdisplay-hid.rules
+KERNEL=="hidg*", MODE="0666"
+EOF
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger 2>/dev/null || true
+
+# 8. Установка и активация системного сервиса
 echo "[DeckDisplay] Установка системного сервиса deckdisplay-gadget.service..."
 SERVICE_FILE="/etc/systemd/system/deckdisplay-gadget.service"
 cat << EOF > "$SERVICE_FILE"
@@ -70,7 +78,7 @@ systemctl daemon-reload
 systemctl enable deckdisplay-gadget.service
 systemctl restart deckdisplay-gadget.service || true
 
-# 8. Создание ярлыка на Рабочем столе
+# 9. Создание ярлыка на Рабочем столе
 DESKTOP_DIR="/home/deck/Desktop"
 if [ -d "$DESKTOP_DIR" ]; then
     echo "[DeckDisplay] Создание ярлыка запуска на Рабочем столе..."
