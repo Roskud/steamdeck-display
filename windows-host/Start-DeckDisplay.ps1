@@ -62,19 +62,29 @@ if ($Encoder -eq "auto") {
 $serverExe = Join-Path $scriptDir "deckdisplay_server.exe"
 
 function Test-FFmpegDdagrab {
-    $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if (-not $cmd) { return $null }
-    try {
-        $filters = & $cmd.Source -filters 2>&1
-        if ($filters -match "ddagrab") {
-            return $cmd
-        }
-    } catch {}
+    $candidates = @()
+    $cmds = Get-Command -All ffmpeg -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+    if ($cmds) { $candidates += $cmds }
+
+    $wingetFFmpeg = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter "ffmpeg.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+    if ($wingetFFmpeg) { $candidates += $wingetFFmpeg }
+
+    $common = @("C:\ffmpeg\bin\ffmpeg.exe", "C:\tools\ffmpeg\bin\ffmpeg.exe", "C:\ProgramData\chocolatey\bin\ffmpeg.exe")
+    foreach ($p in $common) { if (Test-Path $p) { $candidates += $p } }
+
+    foreach ($exe in ($candidates | Select-Object -Unique)) {
+        try {
+            $filters = & $exe -filters 2>&1
+            if ($filters -match "ddagrab") {
+                return $exe
+            }
+        } catch {}
+    }
     return $null
 }
 
+$compatibleFFmpeg = Test-FFmpegDdagrab
 if (-not (Test-Path $serverExe)) {
-    $compatibleFFmpeg = Test-FFmpegDdagrab
     if (-not $compatibleFFmpeg) {
         $anyFFmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
         if ($anyFFmpeg) {
@@ -87,6 +97,8 @@ if (-not (Test-Path $serverExe)) {
         Write-Host "    Запустите: .\install-ffmpeg.ps1" -ForegroundColor White
         Write-Host "    Или:       winget install Gyan.FFmpeg" -ForegroundColor White
         Write-Host ""
+    } else {
+        Write-Host "[DeckDisplay] Используется FFmpeg с аппаратным ddagrab: $compatibleFFmpeg" -ForegroundColor Green
     }
 }
 
@@ -135,13 +147,14 @@ while ($true) {
             $pixFormat = if ($Encoder -eq "libx264") { "format=yuv420p" } else { "format=nv12" }
 
             # Фильтр ddagrab производит аппаратный захват экрана напрямую из D3D11 VRAM
-            $cmd = "ffmpeg -hide_banner -loglevel warning " +
+            $ffmpegExe = if ($compatibleFFmpeg) { $compatibleFFmpeg } else { "ffmpeg" }
+            $cmd = "`"$ffmpegExe`" -hide_banner -loglevel warning " +
                    "-f lavfi -i `"ddagrab=output_idx=$($OutputIdx):framerate=$($Framerate):draw_mouse=1,hwdownload,format=bgra,$pixFormat`" " +
                    "$encArgs -b:v $Bitrate -maxrate $Bitrate -bufsize 500k -g $Framerate " +
                    "-f h264 `"udp://$($DeckIP):$($Port)?pkt_size=1400`""
 
             Write-Host "[DeckDisplay] Команда: $cmd" -ForegroundColor DarkGray
-            Invoke-Expression $cmd
+            Invoke-Expression "& $cmd"
         }
 
         Write-Host "[DeckDisplay] Соединение прервано или кабель отключен. Ожидание повторного подключения..." -ForegroundColor Yellow

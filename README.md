@@ -22,6 +22,9 @@
 
 ```text
 deckdisplay/
+├── DeckDisplay.exe                 # Готовая к запуску программа для ПК (GUI + Трей + Вотчдог)
+├── run-deckdisplay.bat             # Быстрый запуск из корня проекта в один клик
+│
 ├── steamos-client/                 # Клиентская часть для Steam Deck (SteamOS / Arch Linux)
 │   ├── deckdisplay-gadget.sh       # Настройка USB ConfigFS (CDC-NCM сеть + HID тачскрин + DHCP)
 │   ├── deckdisplay-cleanup.sh      # Корректная и безопасная выгрузка USB-гаджета
@@ -33,10 +36,17 @@ deckdisplay/
 │   └── Makefile                    # Сборка высокопроизводительных бинарников на SteamOS
 │
 ├── windows-host/                   # Серверная часть для ПК (Windows 10/11)
+│   ├── DeckDisplay.exe             # Готовое скомпилированное приложение с современным GUI и треем
+│   ├── deckdisplay_app.py          # Главное графическое приложение (CustomTkinter + System Tray)
+│   ├── engine.py                   # Модуль трансляции (DXGI ddagrab, GPU NVENC/AMF/QSV, телеметрия)
+│   ├── tray.py                     # Менеджер системного трея (динамические бейджи, контекстное меню)
+│   ├── watchdog.py                 # Фоновый Plug & Play вотчдог сети USB-C и автоподключения
+│   ├── config.py                   # Менеджер сохраненных настроек и автозапуска Windows
+│   ├── build_exe.py                # Скрипт сборки автономного DeckDisplay.exe (PyInstaller)
 │   ├── deckdisplay_server.cpp      # C++ сервер Zero-Copy захвата DXGI D3D11 + NVENC/AMF/QSV
 │   ├── CMakeLists.txt              # Конфигурация CMake для сборки в Visual Studio / Clang
 │   ├── Start-DeckDisplay.ps1       # Автоматический вотчдог (авто-сеть, авто-GPU, FFmpeg ddagrab)
-│   ├── run-deckdisplay.bat         # Запуск сервера двойным кликом мыши
+│   ├── run-deckdisplay.bat         # Быстрый запуск DeckDisplay.exe в один клик
 │   └── install-ffmpeg.ps1          # Быстрая установка FFmpeg через winget
 │
 ├── virtual-display/                # Настройка виртуального монитора IddCx для Windows
@@ -121,10 +131,13 @@ Windows должна знать, к какому именно монитору �
 ---
 
 ### Шаг 5. Повседневный запуск
-
-1. **На ПК:** Запустите **`run-deckdisplay.bat`** (или `Start-DeckDisplay.ps1`). Вотчдог перейдет в режим ожидания подключения консоли.
-2. **На Steam Deck:** Вставьте кабель USB Type-C в ПК и запустите ярлык **DeckDisplay** в игровом режиме SteamOS.
-3. Рабочий стол Windows мгновенно появится на экране Steam Deck! При отключении кабеля клиент автоматически закроется и вернет вас в интерфейс Steam.
+ 
+1. **На ПК:** Запустите **`DeckDisplay.exe`** (или `run-deckdisplay.bat`).
+   - Откроется стильный интерфейс управления с мониторингом, автоопределением видеокарты и дисплеев.
+   - Программа автоматически свернется в системный трей (область уведомлений Windows рядом с часами) при закрытии на крестик `[X]`.
+   - В трее доступно контекстное меню: запуск/остановка трансляции, выбор монитора, частоты 60/90 Гц, калибровка сенсорного экрана и опция автозапуска с Windows.
+2. **На Steam Deck:** Вставьте кабель USB Type-C в ПК и запустите ярлык **DeckDisplay** в игровом режиме SteamOS (или активируйте через плагин Decky Loader).
+3. Рабочий стол Windows мгновенно появится на экране Steam Deck! При отключении кабеля трансляция безопасно приостанавливается и автоматически возобновляется при повторном подключении.
 
 ---
 

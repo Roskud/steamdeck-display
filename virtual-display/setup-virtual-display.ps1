@@ -4,11 +4,20 @@
 # C:\IddSampleDriver\option.txt and assists with driver deployment.
 # ==============================================================================
 
+[CmdletBinding()]
+param(
+    [switch]$NonInteractive,
+    [switch]$OpenBrowser
+)
+
 # Проверка прав администратора
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "[DeckDisplay] Требуются права Администратора для настройки драйвера..." -ForegroundColor Yellow
-    Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    $argsList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    if ($NonInteractive) { $argsList += " -NonInteractive" }
+    if ($OpenBrowser) { $argsList += " -OpenBrowser" }
+    Start-Process powershell -Verb RunAs -ArgumentList $argsList
     exit
 }
 
@@ -49,8 +58,12 @@ if ($iddDevice) {
     Write-Host "   или установите через Диспетчер устройств -> Действие -> Установить старое устройство." -ForegroundColor White
     Write-Host ""
 
-    $choice = Read-Host "Открыть страницу загрузки драйвера в браузере? (Y/N)"
-    if ($choice -match "^[yYдД]") {
+    if (-not $NonInteractive) {
+        $choice = Read-Host "Открыть страницу загрузки драйвера в браузере? (Y/N)"
+        if ($choice -match "^[yYдД]") {
+            Start-Process "https://github.com/itsmikethetech/Virtual-Display-Driver/releases"
+        }
+    } elseif ($OpenBrowser) {
         Start-Process "https://github.com/itsmikethetech/Virtual-Display-Driver/releases"
     }
 }
