@@ -6,19 +6,17 @@
 
 ## 🚀 Установка
 
-### 1. Для Steam Deck (Плагин Decky)
-Самый простой способ установки — через Decky Loader.
+### 1. Для Steam Deck (SteamOS)
+Самый простой способ — использовать готовый лаунчер, не требующий установки системных пакетов.
 
-1. Установите [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
-2. Нажмите кнопку `...` (Quick Access Menu) → иконка **Decky Loader** (шестеренка).
-3. Перейдите в раздел **Developer** и вставьте ссылку на этот репозиторий:
-   `https://github.com/Roskud/steamdeck-display`
-4. Нажмите **Install**. Плагин появится в меню.
+1. Скачайте файлы проекта на Steam Deck.
+2. Перейдите в папку `steamos-client`.
+3. Запустите файл `portable_run.sh` (в режиме рабочего стола или добавьте его как стороннюю игру в Steam).
 
 ### 2. Для ПК (Windows)
-1. Перейдите в раздел [Releases](https://github.com/Roskud/steamdeck-display/releases) (или скачайте готовый `DeckDisplay.exe` из папки `/releases` в этом репозитории).
-2. Запустите `DeckDisplay.exe`.
-3. Подключите Steam Deck кабелем Type-C.
+1. Перейдите в раздел [Releases](https://github.com/Roskud/steamdeck-display/releases).
+2. Скачайте `DeckDisplay.exe`.
+3. Запустите его и подключите Steam Deck кабелем Type-C.
 
 ---
 
