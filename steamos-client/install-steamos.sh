@@ -26,22 +26,53 @@ if command -v steamos-readonly >/dev/null 2>&1; then
     steamos-readonly disable || true
 fi
 
-# 3. Инициализация ключей пакетного менеджера pacman
-echo "[DeckDisplay] Проверка и обновление ключей pacman..."
+# 3. Инициализация ключей и настройка pacman
+echo "[DeckDisplay] Настройка pacman и отключение таймаута загрузки..."
+if [ -f /etc/pacman.conf ]; then
+    sed -i '/^#DisableDownloadTimeout/s/^#//' /etc/pacman.conf 2>/dev/null || true
+    if ! grep -q "^DisableDownloadTimeout" /etc/pacman.conf; then
+        sed -i '/\[options\]/a DisableDownloadTimeout' /etc/pacman.conf 2>/dev/null || true
+    fi
+fi
+
 pacman-key --init || true
 pacman-key --populate archlinux holo 2>/dev/null || true
 
-# 4. Установка пакетов компиляции и зависимостей
-echo "[DeckDisplay] Установка зависимостей (gcc, sdl2, ffmpeg, dnsmasq, pkgconf)..."
-pacman -Sy --needed --noconfirm base-devel gcc pkgconf sdl2 ffmpeg dnsmasq linux-api-headers glibc || {
-    echo "[Предупреждение] pacman завершился с предупреждением, продолжаем..."
-}
+# 4. Установка пакетов компиляции и зависимостей с повторными попытками
+echo "[DeckDisplay] Установка зависимостей (gcc, make, sdl2, ffmpeg, dnsmasq, pkgconf)..."
+SUCCESS=0
+for attempt in 1 2 3; do
+    echo "[DeckDisplay] Попытка загрузки пакетов ($attempt из 3)..."
+    if pacman -Sy --needed --noconfirm gcc make base-devel pkgconf sdl2 ffmpeg dnsmasq linux-api-headers glibc; then
+        SUCCESS=1
+        break
+    fi
+    echo "[Предупреждение] Сбой загрузки зеркал, ожидание перед повторной попыткой..."
+    sleep 3
+done
+
+if [ "$SUCCESS" -ne 1 ]; then
+    echo "[Внимание] Не удалось загрузить все пакеты через pacman (проблема со связью к серверам SteamOS)."
+    echo "[DeckDisplay] Пробуем установить только gcc и make..."
+    pacman -S --needed --noconfirm gcc make || true
+fi
 
 # 5. Сборка бинарников
 echo "[DeckDisplay] Сборка высокопроизводительных модулей (deckdisplay_touch, deckdisplay_client)..."
 cd "$DIR"
-make clean || true
-make
+if command -v make >/dev/null 2>&1; then
+    make clean || true
+    make
+else
+    echo "[DeckDisplay] make не найден, компиляция напрямую через gcc..."
+    gcc -O3 -march=znver2 -Wall -Wextra -o deckdisplay_touch deckdisplay_touch.c
+    gcc -O3 -march=znver2 -Wall -Wextra -o deckdisplay_client deckdisplay_client.c $(pkg-config --cflags --libs sdl2 libavcodec libavformat libavutil 2>/dev/null || echo "-lSDL2 -lavcodec -lavformat -lavutil")
+fi
+
+if [ ! -f "$DIR/deckdisplay_touch" ] || [ ! -f "$DIR/deckdisplay_client" ]; then
+    echo "[ОШИБКА] Сборка не удалась. Убедитесь, что установлены gcc и библиотеки."
+    exit 1
+fi
 
 # 6. Установка прав на исполнение скриптов
 chmod +x "$DIR/deckdisplay-gadget.sh"
