@@ -1,38 +1,30 @@
 # DeckDisplay 🎮🖥️
 
-**DeckDisplay** — это высокопроизводительное решение с открытым исходным кодом, превращающее **Steam Deck (LCD и OLED)** в сверхбыстрый проводной второй монитор для ПК по кабелю **USB Type-C**.
+**DeckDisplay** — это высокопроизводительное решение с открытым исходным кодом, превращающее ваш **Steam Deck** в быстрый проводной второй монитор для ПК по кабелю USB-C.
+
+[English Version](README_EN.md)
 
 ---
 
 ## 🚀 Установка
 
-### 1. Для Steam Deck (SteamOS)
-Самый простой способ — использовать готовый лаунчер, не требующий установки системных пакетов.
+### Вариант 1: Decky Loader Plugin (Рекомендуется для SteamOS)
+Самый удобный способ интеграции в систему.
+1. Установите **Decky Loader** на Steam Deck.
+2. Скачайте `DeckDisplay_Plugin.zip` из [Releases](https://github.com/Roskud/steamdeck-display/releases).
+3. Перетащите архив в папку `/home/deck/homebrew/plugins/` или используйте "USB-установку" в Decky.
 
-1. Скачайте файлы проекта на Steam Deck.
-2. Перейдите в папку `steamos-client`.
-3. Запустите файл `portable_run.sh` (в режиме рабочего стола или добавьте его как стороннюю игру в Steam).
-
-### 2. Для ПК (Windows)
-1. Перейдите в раздел [Releases](https://github.com/Roskud/steamdeck-display/releases).
-2. Скачайте `DeckDisplay.exe`.
-3. Запустите его и подключите Steam Deck кабелем Type-C.
-
----
-
-## 📁 Файлы для установки
-Вы можете скачать готовые файлы прямо из этого репозитория:
-- [DeckDisplay.exe](releases/DeckDisplay.exe) — готовое приложение для Windows.
-- [DeckDisplay_Plugin.zip](releases/DeckDisplay_Plugin.zip) — архив для ручной установки плагина (если не работает установка через ссылку).
+### Вариант 2: Портативный клиент (Без установки)
+Если не хотите устанавливать Decky:
+1. Скачайте `DeckDisplay_Static.tar.gz`.
+2. Распакуйте на Steam Deck.
+3. Запустите `launch_deckdisplay.sh`.
 
 ---
 
-## ⚙️ Технические особенности
-- **Zero-Copy**: Аппаратный захват (NVENC/AMF/QSV) и декодирование (VA-API).
-- **Plug & Play**: Автоматическая настройка сети и тачскрина при подключении.
-- **Поддержка**: 60/90 Гц, сенсорный ввод.
+## 💻 Для ПК (Windows)
+1. Скачайте [DeckDisplay.exe](https://github.com/Roskud/steamdeck-display/releases).
+2. Запустите и подключите Steam Deck кабелем Type-C.
 
 ---
-
-## 🛠️ Сборка из исходников
-Если вы разработчик, инструкции по сборке C++ сервера и C-клиента находятся в папках `windows-host` и `steamos-client`.
+*Сделано с любовью для сообщества Steam Deck.*
