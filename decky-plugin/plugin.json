@@ -2,7 +2,7 @@
   "name": "DeckDisplay",
   "author": "DeckDisplay Project",
   "flags": ["root"],
-  "api_version": 1,
+  "api_version": 2,
   "publish": {
     "tags": ["display", "monitor", "usb", "streaming", "touchscreen"],
     "description": "Превращает Steam Deck в проводной низколатентный сенсорный монитор для ПК по USB Type-C.",

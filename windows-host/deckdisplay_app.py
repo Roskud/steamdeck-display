@@ -7,6 +7,7 @@
 import ctypes
 import os
 import subprocess
+import socket
 import sys
 import threading
 import time
@@ -124,6 +125,24 @@ class DeckDisplayApp(ctk.CTk):
         if start_minimized or self.settings.get("start_minimized", False):
             self.withdraw()
             self.tray_manager.set_status("idle", "DeckDisplay запущен в трее")
+        
+        self._start_udp_listener()
+
+    def _start_udp_listener(self):
+        def _listener():
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                # Allow port reuse
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(('', 5001))
+                self._log_message("[UDP] Слушатель запущен на порту 5001...")
+                while True:
+                    data, addr = sock.recvfrom(1024)
+                    self._log_message(f"[UDP] Получен пакет от {addr}")
+            except Exception as e:
+                self._log_message(f"[UDP] Ошибка слушателя: {e}")
+        
+        threading.Thread(target=_listener, daemon=True).start()
 
     # -------------------------------------------------------------------------
     # UI Building

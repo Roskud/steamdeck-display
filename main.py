@@ -252,7 +252,7 @@ class Plugin:
             self._stop_touch_daemon()
 
         if os.path.exists(script):
-            res = subprocess.run([script], capture_output=True, text=True)
+            res = subprocess.run(["/bin/bash", script], capture_output=True, text=True)
             if res.returncode != 0:
                 logger.error(f"[DeckDisplay] Ошибка выполнения {script}: {res.stderr}")
         else:
@@ -297,10 +297,36 @@ class Plugin:
 
         if self.settings.get("auto_enable_gadget_on_boot", True) and not self._is_gadget_active():
             if os.path.exists(GADGET_SCRIPT):
-                subprocess.run([GADGET_SCRIPT], capture_output=True)
+                subprocess.run(["/bin/bash", GADGET_SCRIPT], capture_output=True)
+                logger.info("[DeckDisplay] Gadget script executed")
+
+    async def _discovery_broadcast_loop(self) -> None:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        while True:
+            try:
+                # Шлем сигнал "DeckDisplay" каждые 5 секунд
+                message = b"DECKDISPLAY_DISCOVER"
+                sock.sendto(message, ('255.255.255.255', 5001))
+            except Exception as e:
+                logger.error(f"[DeckDisplay] Ошибка broadcast: {e}")
+            await asyncio.sleep(5)
+
+    async def _main(self) -> None:
+        logger.info("[DeckDisplay] Инициализация бэкенда плагина DeckDisplay...")
+        self._load_settings()
+
+        if self.settings.get("auto_enable_gadget_on_boot", True) and not self._is_gadget_active():
+            if os.path.exists(GADGET_SCRIPT):
+                subprocess.run(["/bin/bash", GADGET_SCRIPT], capture_output=True)
+                logger.info("[DeckDisplay] Gadget script executed")
 
         self._last_carrier_state = self._is_usb_cable_connected()
+        logger.info("[DeckDisplay] Starting monitor and discovery tasks")
         self.monitor_task = asyncio.ensure_future(self._status_monitor_loop())
+        asyncio.ensure_future(self._discovery_broadcast_loop())
+        logger.info("[DeckDisplay] Tasks started")
 
     async def _unload(self) -> None:
         logger.info("[DeckDisplay] Выгрузка плагина...")
